@@ -1,0 +1,454 @@
+<!DOCTYPE html>
+<html lang="sv">
+<head>
+  <meta charset="UTF-8">
+  <title>Solana Token Manager - Phantom Front-End</title>
+  <style>
+    body {
+      background-color: #1e1e1e;
+      color: #f0f0f0;
+      font-family: sans-serif;
+      margin: 0;
+      padding: 0;
+    }
+    .container {
+      max-width: 900px;
+      margin: 0 auto;
+      padding: 2rem;
+    }
+    h1, h2 {
+      color: #fff;
+    }
+    .section {
+      margin-bottom: 2rem;
+      background-color: #2b2b2b;
+      padding: 1rem;
+      border-radius: 6px;
+    }
+    label {
+      display: inline-block;
+      width: 140px;
+      margin-bottom: 0.5rem;
+    }
+    input[type="text"],
+    input[type="number"] {
+      background-color: #333;
+      color: #f0f0f0;
+      border: 1px solid #444;
+      margin-bottom: 1rem;
+      padding: 0.5rem;
+      width: 250px;
+    }
+    select,
+    button {
+      background-color: #444;
+      color: #f0f0f0;
+      border: 1px solid #666;
+      padding: 0.5rem 1rem;
+      margin-bottom: 1rem;
+      cursor: pointer;
+    }
+    button:hover {
+      background-color: #666;
+    }
+    pre {
+      background-color: #333;
+      padding: 1rem;
+      overflow-x: auto;
+      color: #f0f0f0;
+      border: 1px solid #444;
+    }
+  </style>
+</head>
+<body>
+<div class="container">
+  <h1>Solana Token Manager (Phantom + Front-End)</h1>
+
+  <!-- A) Connect Phantom -->
+  <div class="section">
+    <h2>A) Connect Wallet</h2>
+    <button id="connectPhantomBtn">Connect Phantom</button>
+    <p id="phantomStatus"></p>
+
+    <h3>Välj Nätverk</h3>
+    <select id="networkSelect">
+      <option value="devnet">Devnet</option>
+      <option value="testnet">Testnet</option>
+      <option value="mainnet-beta">Mainnet</option>
+    </select>
+    <p>Nuvarande nätverk: <span id="currentNetwork">devnet</span></p>
+  </div>
+
+  <!-- B) Skapa Token -->
+  <div class="section">
+    <h2>B) Skapa Token</h2>
+    <label>Decimaler:</label>
+    <input type="number" id="decimals" value="6" /><br/>
+    <label>Initial Supply:</label>
+    <input type="number" id="initialSupply" value="1000000" /><br/>
+    <label>Revoke Mint?</label>
+    <input type="checkbox" id="revokeMint" /><br/>
+    <button id="createTokenBtn">Skapa Token</button>
+    <pre id="resultCreateToken"></pre>
+  </div>
+
+  <!-- C) Visa Saldo -->
+  <div class="section">
+    <h2>C) Visa Saldo</h2>
+    <label>Token Mint:</label>
+    <input type="text" id="balanceMint" placeholder="Ex: ABC123..." /><br/>
+    <button id="checkBalanceBtn">Visa Saldo</button>
+    <pre id="resultBalance"></pre>
+  </div>
+
+  <!-- D) Transfer Tokens -->
+  <div class="section">
+    <h2>D) Transfer Tokens</h2>
+    <label>Token Mint:</label>
+    <input type="text" id="transferMint" placeholder="Ex: ABC123..." /><br/>
+    <label>Antal:</label>
+    <input type="number" id="transferAmount" value="100" /><br/>
+    <label>Mottagare:</label>
+    <input type="text" id="transferRecipient" placeholder="Ex: 4tQd...123" /><br/>
+    <button id="transferBtn">Transfer</button>
+    <pre id="resultTransfer"></pre>
+  </div>
+
+  <!-- E) Burn Tokens -->
+  <div class="section">
+    <h2>E) Burn Tokens</h2>
+    <label>Token Mint:</label>
+    <input type="text" id="burnMint" placeholder="Ex: ABC123..." /><br/>
+    <label>Antal:</label>
+    <input type="number" id="burnAmount" value="10" /><br/>
+    <button id="burnBtn">Burn</button>
+    <pre id="resultBurn"></pre>
+  </div>
+
+  <!-- F) Sätt Metaplex Metadata -->
+  <div class="section">
+    <h2>F) Sätt Metaplex Metadata</h2>
+    <label>Token Mint:</label>
+    <input type="text" id="metaMint" placeholder="Mint address" /><br/>
+    <label>Namn:</label>
+    <input type="text" id="metaName" placeholder="Ex: MyToken" /><br/>
+    <label>Symbol:</label>
+    <input type="text" id="metaSymbol" placeholder="Ex: MTK" /><br/>
+    <label>URI:</label>
+    <input type="text" id="metaUri" placeholder="https://exempel.com/metadata.json" /><br/>
+    <button id="setMetadataBtn">Sätt Metadata</button>
+    <pre id="resultMetadata"></pre>
+  </div>
+</div>
+
+<!-- Ladda in nödvändiga bibliotek från CDN -->
+<script type="module">
+  import {
+    Connection,
+    clusterApiUrl,
+    Keypair,
+    PublicKey
+  } from "https://cdn.skypack.dev/@solana/web3.js";
+
+  import {
+    createMint,
+    getOrCreateAssociatedTokenAccount,
+    mintTo,
+    transfer,
+    burn,
+    setAuthority,
+    AuthorityType,
+    getMint,
+    getAccount
+  } from "https://cdn.skypack.dev/@solana/spl-token";
+
+  import {
+    Metaplex,
+    walletAdapterIdentity,
+    bundlrStorage
+  } from "https://cdn.skypack.dev/@metaplex-foundation/js";
+
+  let provider = null;       // Phantom
+  let connection = null;     // Solana Connection
+  let currentNetwork = "devnet";
+
+  // ========= Init =========
+  document.getElementById('connectPhantomBtn').onclick = connectPhantom;
+  document.getElementById('createTokenBtn').onclick = createToken;
+  document.getElementById('checkBalanceBtn').onclick = checkBalance;
+  document.getElementById('transferBtn').onclick = transferTokens;
+  document.getElementById('burnBtn').onclick = burnTokens;
+  document.getElementById('setMetadataBtn').onclick = setMetadata;
+
+  // Byt nätverk via dropdown
+  document.getElementById('networkSelect').onchange = (e) => {
+    currentNetwork = e.target.value;
+    document.getElementById('currentNetwork').innerText = currentNetwork;
+  };
+
+  // ========== A) Connect Phantom ==========
+  async function connectPhantom() {
+    if ('solana' in window) {
+      provider = window.solana;
+      if (provider.isPhantom) {
+        try {
+          await provider.connect();
+          document.getElementById('phantomStatus').innerText =
+            "Connected: " + provider.publicKey.toBase58();
+        } catch (err) {
+          console.error(err);
+          document.getElementById('phantomStatus').innerText =
+            "Connection cancelled or failed.";
+        }
+      } else {
+        alert("Phantom not found!");
+      }
+    } else {
+      alert("No Solana wallet found. Please install Phantom.");
+    }
+  }
+
+  // Skapa en Connection utifrån currentNetwork
+  function getConnection() {
+    return new Connection(clusterApiUrl(currentNetwork), "confirmed");
+  }
+
+  // ========== B) Skapa Token ==========
+  async function createToken() {
+    if (!provider || !provider.publicKey) {
+      alert("Connect Phantom first!");
+      return;
+    }
+
+    connection = getConnection();
+
+    const decimals = parseInt(document.getElementById('decimals').value, 10);
+    const initialSupply = parseInt(document.getElementById('initialSupply').value, 10);
+    const revokeMint = document.getElementById('revokeMint').checked;
+
+    // 1) Skapa en ny mint
+    const mintKeypair = Keypair.generate();
+    const payerPubkey = provider.publicKey;
+
+    // createMint() betalas av Phantom
+    const mintPubkey = await createMint(
+      connection,
+      provider,           // payer
+      payerPubkey,        // mintAuthority
+      payerPubkey,        // freezeAuthority
+      decimals,
+      mintKeypair
+    );
+
+    // 2) Skapa ATA i vår wallet
+    const tokenAccount = await getOrCreateAssociatedTokenAccount(
+      connection,
+      provider,
+      mintPubkey,
+      payerPubkey
+    );
+
+    // 3) Mint initial supply
+    await mintTo(
+      connection,
+      provider,
+      mintPubkey,
+      tokenAccount.address,
+      payerPubkey,
+      initialSupply
+    );
+
+    // 4) Revoke mint authority om vald
+    if (revokeMint) {
+      await setAuthority(
+        connection,
+        provider,
+        mintPubkey,
+        payerPubkey,
+        AuthorityType.MintTokens,
+        null // null => disable
+      );
+    }
+
+    document.getElementById('resultCreateToken').innerText =
+      `Token Created!\nMint Address: ${mintPubkey.toBase58()}\nDecimals: ${decimals}\n` +
+      `Initial Supply minted: ${initialSupply}\nRevoke Mint: ${revokeMint}\n\n` +
+      `Enjoy your new token!`;
+  }
+
+  // ========== C) Visa Saldo ==========
+  async function checkBalance() {
+    if (!provider || !provider.publicKey) {
+      alert("Connect Phantom first!");
+      return;
+    }
+    connection = getConnection();
+
+    const mintStr = document.getElementById('balanceMint').value;
+    if (!mintStr) return;
+
+    const mintPubkey = new PublicKey(mintStr);
+    const payerPubkey = provider.publicKey;
+
+    // Hämta info om minted token
+    const mintInfo = await getMint(connection, mintPubkey);
+
+    // Kolla om vi har en ATA redan
+    const tokenAccount = await getOrCreateAssociatedTokenAccount(
+      connection,
+      provider,
+      mintPubkey,
+      payerPubkey
+    );
+
+    // Hämta kontoinfo
+    const accountInfo = await getAccount(connection, tokenAccount.address);
+
+    // Beräkna "riktigt" saldo
+    const balance = Number(accountInfo.amount) / (10 ** mintInfo.decimals);
+
+    document.getElementById('resultBalance').innerText =
+      `Saldo: ${balance} tokens (decimals: ${mintInfo.decimals})\n` +
+      `Mint Authority: ${mintInfo.mintAuthority?.toBase58() || 'Disabled'}\n` +
+      `Supply: ${Number(mintInfo.supply)/(10**mintInfo.decimals)}`;
+  }
+
+  // ========== D) Transfer Tokens ==========
+  async function transferTokens() {
+    if (!provider || !provider.publicKey) {
+      alert("Connect Phantom first!");
+      return;
+    }
+    connection = getConnection();
+
+    const mintStr = document.getElementById('transferMint').value;
+    const amount = parseInt(document.getElementById('transferAmount').value, 10);
+    const recipientStr = document.getElementById('transferRecipient').value;
+
+    if (!mintStr || !recipientStr) return;
+
+    const mintPubkey = new PublicKey(mintStr);
+    const recipientPubkey = new PublicKey(recipientStr);
+    const payerPubkey = provider.publicKey;
+
+    // Kolla decimals
+    const mintInfo = await getMint(connection, mintPubkey);
+    const realAmount = amount * (10 ** mintInfo.decimals);
+
+    // Kolla sändarens ATA
+    const senderTokenAccount = await getOrCreateAssociatedTokenAccount(
+      connection,
+      provider,
+      mintPubkey,
+      payerPubkey
+    );
+
+    // Kolla mottagarens ATA
+    const recipientTokenAccount = await getOrCreateAssociatedTokenAccount(
+      connection,
+      provider,
+      mintPubkey,
+      recipientPubkey
+    );
+
+    // Transfer
+    await transfer(
+      connection,
+      provider,
+      senderTokenAccount.address,
+      recipientTokenAccount.address,
+      payerPubkey,
+      realAmount
+    );
+
+    document.getElementById('resultTransfer').innerText =
+      `Transferred ${amount} tokens to ${recipientStr} successfully!`;
+  }
+
+  // ========== E) Burn Tokens ==========
+  async function burnTokens() {
+    if (!provider || !provider.publicKey) {
+      alert("Connect Phantom first!");
+      return;
+    }
+    connection = getConnection();
+
+    const mintStr = document.getElementById('burnMint').value;
+    const amount = parseInt(document.getElementById('burnAmount').value, 10);
+    if (!mintStr) return;
+
+    const mintPubkey = new PublicKey(mintStr);
+    const payerPubkey = provider.publicKey;
+
+    // Kolla decimals
+    const mintInfo = await getMint(connection, mintPubkey);
+    const realAmount = amount * (10 ** mintInfo.decimals);
+
+    // Hämta ATA
+    const tokenAccount = await getOrCreateAssociatedTokenAccount(
+      connection,
+      provider,
+      mintPubkey,
+      payerPubkey
+    );
+
+    // Burn
+    await burn(
+      connection,
+      provider,
+      tokenAccount.address,
+      mintPubkey,
+      payerPubkey,
+      realAmount
+    );
+
+    document.getElementById('resultBurn').innerText =
+      `Burned ${amount} tokens from mint ${mintStr}`;
+  }
+
+  // ========== F) Sätt Metaplex Metadata ==========
+  async function setMetadata() {
+    if (!provider || !provider.publicKey) {
+      alert("Connect Phantom first!");
+      return;
+    }
+    connection = getConnection();
+
+    const mintStr = document.getElementById('metaMint').value;
+    const name = document.getElementById('metaName').value;
+    const symbol = document.getElementById('metaSymbol').value;
+    const uri = document.getElementById('metaUri').value;
+
+    if (!mintStr) return;
+
+    const mintPubkey = new PublicKey(mintStr);
+
+    // Skapa en Metaplex-instans som använder Phantom
+    const mx = Metaplex.make(connection)
+      .use(walletAdapterIdentity(provider))
+      .use(bundlrStorage()); // Om du vill ladda upp filer via bundlr
+
+    // Om du redan har en existerande SPL-token, kan du "createSft" med useExistingMint
+    // Men det funkar bäst om metadata inte redan är satt. Alternativet är "updateNft" / "updateSft".
+    // Här är en snabbvariant:
+    try {
+      const { sft } = await mx.nfts().createSft({
+        name,
+        symbol,
+        uri,
+        sellerFeeBasisPoints: 0, // 0 = ingen royalty
+        useExistingMint: mintPubkey,
+        tokenOwner: provider.publicKey,
+      });
+
+      document.getElementById('resultMetadata').innerText =
+        `Metadata set!\nName: ${name}\nSymbol: ${symbol}\nURI: ${uri}\nMint: ${mintPubkey.toBase58()}`;
+    } catch (err) {
+      console.error(err);
+      document.getElementById('resultMetadata').innerText =
+        "Error setting metadata: " + err.message;
+    }
+  }
+</script>
+</body>
+</html>
